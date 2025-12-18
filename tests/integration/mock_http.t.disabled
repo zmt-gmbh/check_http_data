@@ -1,0 +1,232 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use Test::More tests => 20;
+use Test::Output;
+use Capture::Tiny 'capture';
+use Cwd 'abs_path';
+use File::Basename 'dirname';
+use HTTP::Server::Simple::CGI;
+use Time::HiRes 'sleep';
+use POSIX ':sys_wait_h';
+
+# Integration tests with mock HTTP server
+my $script_dir = dirname(abs_path($0));
+my $main_script = "$script_dir/../../check_http_data.pl";
+my $test_data_dir = "$script_dir/../data";
+
+# Mock HTTP server class
+{
+    package TestHTTPServer;
+    use base qw(HTTP::Server::Simple::CGI);
+    
+    my $response_data = '';
+    my $response_content_type = 'application/json';
+    my $response_status = 200;
+    
+    sub set_response {
+        my ($class, $data, $content_type, $status) = @_;
+        $response_data = $data;
+        $response_content_type = $content_type || 'application/json';
+        $response_status = $status || 200;
+    }
+    
+    sub handle_request {
+        my ($self, $cgi) = @_;
+        
+        if ($response_status != 200) {
+            print "HTTP/1.1 $response_status Error\r\n";
+            print "Content-Type: text/plain\r\n\r\n";
+            print "Error $response_status\r\n";
+            return;
+        }
+        
+        print "HTTP/1.1 200 OK\r\n";
+        print "Content-Type: $response_content_type\r\n";
+        print "Content-Length: " . length($response_data) . "\r\n\r\n";
+        print $response_data;
+    }
+}
+
+# Helper function to read test data files
+sub read_test_data {
+    my ($filename) = @_;
+    my $filepath = "$test_data_dir/$filename";
+    open my $fh, '<', $filepath or die "Cannot open $filepath: $!";
+    my $content = do { local $/; <$fh> };
+    close $fh;
+    return $content;
+}
+
+# Start test server
+my $server_port = 18080;
+my $server_pid;
+
+sub start_test_server {
+    $server_pid = fork();
+    if ($server_pid == 0) {
+        # Child process - run server
+        my $server = TestHTTPServer->new($server_port);
+        $server->run();
+        exit(0);
+    }
+    # Parent process - wait for server to start
+    sleep(0.5);
+    return $server_pid;
+}
+
+sub stop_test_server {
+    if ($server_pid) {
+        kill 'TERM', $server_pid;
+        waitpid($server_pid, 0);
+    }
+}
+
+# Skip tests if HTTP::Server::Simple not available
+SKIP: {
+    eval "use HTTP::Server::Simple::CGI; 1" or do {
+        skip "HTTP::Server::Simple::CGI not available", 20;
+    };
+    
+    start_test_server();
+    
+    subtest 'JSON Response Tests' => sub {
+        plan tests => 6;
+        
+        # Set up JSON response
+        my $json_data = read_test_data('sample.json');
+        TestHTTPServer->set_response($json_data, 'application/json');
+        
+        # Test basic JSON query
+        my ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.status' --type json 2>&1");
+        };
+        is($exit, 0, "JSON query succeeds");
+        like($stdout, qr/\$.system\.status: healthy/, "JSON query returns expected value");
+        
+        # Test numeric JSON query with performance data
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.cpu.usage' --type json --perfdata 2>&1");
+        };
+        is($exit, 0, "JSON numeric query succeeds");
+        like($stdout, qr/\|.*cpu_usage=45\.2/, "Performance data generated");
+        
+        # Test JSON array access
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.services[0].name' --type json 2>&1");
+        };
+        is($exit, 0, "JSON array query succeeds");
+        like($stdout, qr/\$.services\[0\]\.name: web/, "JSON array access works");
+    };
+    
+    subtest 'XML Response Tests' => sub {
+        plan tests => 6;
+        
+        # Set up XML response
+        my $xml_data = read_test_data('sample.xml');
+        TestHTTPServer->set_response($xml_data, 'application/xml');
+        
+        # Test basic XPath query
+        my ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '//system/state' --type xml 2>&1");
+        };
+        is($exit, 0, "XPath query succeeds");
+        like($stdout, qr|//system/state: operational|, "XPath query returns expected value");
+        
+        # Test numeric XPath query
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '//voip/registered' --type xml --perfdata 2>&1");
+        };
+        is($exit, 0, "XPath numeric query succeeds");
+        like($stdout, qr/\|.*voip_registered=5/, "Performance data generated for XML");
+        
+        # Test XPath with attributes
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '//interface[\@name=\"eth0\"]/status' --type xml 2>&1");
+        };
+        is($exit, 0, "XPath with attributes succeeds");
+        like($stdout, qr/up/, "XPath attribute query works");
+    };
+    
+    subtest 'Threshold Tests' => sub {
+        plan tests => 6;
+        
+        # Set up JSON response
+        my $json_data = read_test_data('sample.json');
+        TestHTTPServer->set_response($json_data, 'application/json');
+        
+        # Test OK threshold
+        my ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.cpu.usage' --threshold '\$.system.cpu.usage:80:90' --type json 2>&1");
+        };
+        is($exit, 0, "Threshold OK test");
+        like($stdout, qr/THRESHOLD OK/, "Threshold OK message");
+        
+        # Test WARNING threshold  
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.cpu.usage' --threshold '\$.system.cpu.usage:30:80' --type json 2>&1");
+        };
+        is($exit, 1, "Threshold WARNING test");
+        like($stdout, qr/THRESHOLD WARNING/, "Threshold WARNING message");
+        
+        # Test CRITICAL threshold
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.cpu.usage' --threshold '\$.system.cpu.usage:20:30' --type json 2>&1");
+        };
+        is($exit, 2, "Threshold CRITICAL test");
+        like($stdout, qr/THRESHOLD CRITICAL/, "Threshold CRITICAL message");
+    };
+    
+    subtest 'String Check Tests' => sub {
+        plan tests => 6;
+        
+        # Set up JSON response
+        my $json_data = read_test_data('sample.json');
+        TestHTTPServer->set_response($json_data, 'application/json');
+        
+        # Test string check OK
+        my ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.status' -s '\$.system.status:^healthy\$:ok' --type json 2>&1");
+        };
+        is($exit, 0, "String check OK test");
+        like($stdout, qr/STRING CHECK OK/, "String check OK message");
+        
+        # Test string check pattern matching
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.services[0].status' -s '\$.services[0].status:^(running|active)\$:ok' --type json 2>&1");
+        };
+        is($exit, 0, "String check pattern matching");
+        like($stdout, qr/STRING CHECK OK/, "String pattern matching OK");
+        
+        # Test string check failure (should result in CRITICAL)
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.system.status' -s '\$.system.status:^failed\$:ok' --type json 2>&1");
+        };
+        is($exit, 2, "String check failure results in CRITICAL");
+        like($stdout, qr/STRING CHECK FAILED/, "String check failure message");
+    };
+    
+    subtest 'Error Handling Tests' => sub {
+        plan tests => 4;
+        
+        # Test HTTP error response
+        TestHTTPServer->set_response('', 'text/plain', 404);
+        my ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.test' --type json 2>&1");
+        };
+        is($exit, 2, "HTTP error results in CRITICAL");
+        like($stdout, qr/HTTP request failed/, "HTTP error message");
+        
+        # Test invalid JSON
+        TestHTTPServer->set_response('invalid json {', 'application/json', 200);
+        ($stdout, $stderr, $exit) = capture {
+            system("perl '$main_script' -H localhost --port $server_port -p /test -q '\$.test' --type json 2>&1");
+        };
+        is($exit, 2, "Invalid JSON results in CRITICAL");
+        like($stdout, qr/Failed to parse JSON/, "JSON parse error message");
+    };
+    
+    stop_test_server();
+}
+
+done_testing();

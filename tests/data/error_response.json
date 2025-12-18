@@ -1,0 +1,20 @@
+{
+    "database": "error",
+    "redis": "disconnected",
+    "external_api": "timeout",
+    "system": {
+        "cpu": 95.8,
+        "memory": 98.2,
+        "disk_free": 2.1
+    },
+    "services": [
+        {
+            "name": "web",
+            "status": "failed"
+        },
+        {
+            "name": "queue",
+            "status": "degraded"
+        }
+    ]
+}
