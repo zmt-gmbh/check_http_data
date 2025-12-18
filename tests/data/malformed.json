@@ -1,0 +1,6 @@
+{
+    "message": "Not JSON",
+    "data": "This is actually not valid JSON because of syntax errors",
+    "missing_quotes": value_without_quotes,
+    "trailing_comma": "error",
+}

@@ -1,0 +1,66 @@
+{
+    "system": {
+        "status": "healthy",
+        "uptime": 86400,
+        "load": [
+            0.5,
+            0.3,
+            0.2
+        ],
+        "cpu": {
+            "usage": 45.2,
+            "cores": 4
+        },
+        "memory": {
+            "total": 8192,
+            "used": 4096,
+            "percent": 50.0
+        },
+        "disk": {
+            "free_gb": 25.6,
+            "used_percent": 75.2
+        }
+    },
+    "services": [
+        {
+            "name": "web",
+            "status": "running",
+            "port": 80,
+            "health": "ok"
+        },
+        {
+            "name": "database",
+            "status": "running",
+            "port": 3306,
+            "health": "ok",
+            "connections": 42
+        },
+        {
+            "name": "cache",
+            "status": "running",
+            "port": 6379,
+            "health": "ok"
+        }
+    ],
+    "network": {
+        "interfaces": [
+            {
+                "name": "eth0",
+                "status": "up",
+                "rx_bytes": 1048576,
+                "tx_bytes": 524288
+            },
+            {
+                "name": "lo",
+                "status": "up",
+                "rx_bytes": 1024,
+                "tx_bytes": 1024
+            }
+        ]
+    },
+    "api": {
+        "version": "2.1.0",
+        "endpoint": "/v2/status"
+    },
+    "timestamp": "2025-12-18T10:30:00Z"
+}

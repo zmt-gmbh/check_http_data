@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<status>
+    <system>
+        <unclosed_tag>
+        <state>error</state>
+    </system>
+    <!-- Missing closing tag above -->
+</status

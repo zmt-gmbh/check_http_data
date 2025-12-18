@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<status>
+    <system>
+        <state>operational</state>
+        <uptime>86400</uptime>
+        <version>1.2.3</version>
+    </system>
+    <network>
+        <inet>
+            <state>1</state>
+            <ip>192.168.1.100</ip>
+            <gateway>192.168.1.1</gateway>
+        </inet>
+        <interfaces>
+            <interface name="eth0">
+                <status>up</status>
+                <speed>1000</speed>
+                <rx_bytes>1048576</rx_bytes>
+                <tx_bytes>524288</tx_bytes>
+            </interface>
+            <interface name="wlan0">
+                <status>down</status>
+                <speed>0</speed>
+            </interface>
+        </interfaces>
+    </network>
+    <services>
+        <voip>
+            <registered>5</registered>
+            <active>3</active>
+            <status>running</status>
+        </voip>
+        <wlan>
+            <wlanStations>12</wlanStations>
+            <status>active</status>
+        </wlan>
+    </services>
+    <hardware>
+        <cpu>
+            <usage>25</usage>
+            <temperature>45</temperature>
+        </cpu>
+        <memory>
+            <total>512</total>
+            <free>256</free>
+            <used>256</used>
+        </memory>
+        <storage>
+            <disk>
+                <total_gb>32</total_gb>
+                <free_gb>16</free_gb>
+                <used_percent>50</used_percent>
+            </disk>
+        </storage>
+    </hardware>
+    <firmware>2.1.0-build123</firmware>
+    <timestamp>2025-12-18T10:30:00Z</timestamp>
+</status>

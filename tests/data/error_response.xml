@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<status>
+    <system>
+        <state>error</state>
+        <uptime>120</uptime>
+        <error_message>System overload detected</error_message>
+    </system>
+    <network>
+        <inet>
+            <state>2</state>
+            <error>Connection timeout</error>
+        </inet>
+    </network>
+    <services>
+        <voip>
+            <registered>0</registered>
+            <status>failed</status>
+            <error>Service unavailable</error>
+        </voip>
+    </services>
+    <hardware>
+        <cpu>
+            <usage>99</usage>
+            <temperature>85</temperature>
+            <status>critical</status>
+        </cpu>
+        <memory>
+            <used_percent>98</used_percent>
+            <status>critical</status>
+        </memory>
+    </hardware>
+</status>
