@@ -27,9 +27,9 @@ use JSON::Path;
 use Getopt::Long;
 
 my $np = Monitoring::Plugin->new(
-    usage => "Usage: %s -H <hostname> -p <path> [-q <xpath/jsonpath1>] [-q <xpath/jsonpath2>] ... [-T <xml|json|auto>] [-l <path:w:c>] [--string-checks <path:regex>] [--perfdata] [--timeout <seconds>]",
+    usage => "Usage: %s -H <hostname> -p <path> [OPTIONS]\n\nOPTIONS:\n  -q, --query: Query paths (optional if specified in -l/-s)\n  -l, --limit: Thresholds (path:warn:crit)\n  -s, --string-checks: String patterns (path:regex:status)\n  --type: Data type (xml|json|auto)\n  --perfdata: Generate performance data",
     shortname => 'HTTP_XML_JSON_CHECK',
-    version => '1.0',
+    version => '2.0',
     timeout => 30,
     license => "This nagios plugin is free software, and comes with ABSOLUTELY NO WARRANTY.\nIt may be used, redistributed and/or modified under the terms of the GNU\nGeneral Public Licence (see http://www.fsf.org/licensing/licenses/gpl.txt)."
 );
@@ -49,6 +49,8 @@ $np->add_arg(
 $np->add_arg(
     spec => 'query|q=s@',
     help => q{XPath or JSONPath expression(s) to extract values (can be used multiple times)
+    
+    NOTE: If not specified, paths will be automatically extracted from --limit and --string-checks parameters.
 
     XPath Syntax (for XML):
         //element                       - Find 'element' anywhere in document
@@ -77,8 +79,7 @@ $np->add_arg(
         $.system.cpu                    - CPU usage
         $.interfaces[*].status          - All interface statuses
         $.voip.registered               - VoIP registered count
-        $.network.state                 - Network state},
-    required => 1
+        $.network.state                 - Network state}
 );
 
 $np->add_arg(
@@ -177,6 +178,35 @@ $np->add_arg(
 if (grep { $_ =~ /^--samples$/ } @ARGV) {
     print qq{
 DETAILED USAGE EXAMPLES:
+
+    Auto-Path Extraction (New in v2.0):
+    1. Simplified monitoring (paths auto-extracted from thresholds):
+        $0 \\
+            -H api.example.com \\
+            -p /health \\
+            -l "\$.cpu:80:95" \\
+            -l "\$.memory:85:95" \\
+            --perfdata
+            # Queries \$.cpu and \$.memory automatically
+
+    2. String checks only (no explicit queries needed):
+        $0 \\
+            -H api.example.com \\
+            -p /status \\
+            -s "\$.status:^healthy\$:ok" \\
+            -s "\$.database:^connected\$:ok" \\
+            --type json
+            # Queries \$.status and \$.database automatically
+
+    3. Mixed explicit and auto-extracted paths:
+        $0 \\
+            -H api.example.com \\
+            -p /metrics \\
+            -q "\$.version" \\
+            -l "\$.cpu:80:95" \\
+            -s "\$.status:^ok\$:ok" \\
+            --perfdata
+            # Queries \$.version (explicit), \$.cpu and \$.status (auto-extracted)
 
     XML Examples:
     1. Basic XML single value check:
@@ -343,8 +373,23 @@ ICINGA2 CONFIGURATION EXAMPLES:
           vars.data_type = "auto"
         }
 
-    Health Check Service Example:
+    Health Check Service Example (Simplified with Auto-Path Extraction):
         apply Service "api-health-check" {
+          import "generic-service"
+          check_command = "check_http_xml_json"
+          vars.data_path = "/api/health"
+          vars.data_type = "json"
+          # No need for data_queries - auto-extracted from string_checks!
+          vars.data_string_checks = [
+            "\$.database:^ok\$:ok",
+            "\$.redis:^(ok|connected)\$:ok",
+            "\$.external_api:^available\$:ok"
+          ]
+          assign where host.vars.health_monitoring == true
+        }
+
+    Traditional Service Example (Explicit Queries):
+        apply Service "api-monitoring-traditional" {
           import "generic-service"
           check_command = "check_http_xml_json"
           vars.data_path = "/api/health"
@@ -443,6 +488,38 @@ if ($np->opts->{'string-checks'}) {
         }
     }
 }
+
+# Auto-extract paths from thresholds and string checks if no queries specified
+my @queries = ();
+if ($np->opts->query) {
+    @queries = @{$np->opts->query};
+}
+
+# Extract paths from thresholds
+my %auto_paths = ();
+foreach my $path (keys %thresholds) {
+    $auto_paths{$path} = 1;
+}
+
+# Extract paths from string checks
+foreach my $path (keys %string_checks) {
+    $auto_paths{$path} = 1;
+}
+
+# Add auto-extracted paths to queries if not already present
+foreach my $path (keys %auto_paths) {
+    unless (grep { $_ eq $path } @queries) {
+        push @queries, $path;
+    }
+}
+
+# Validate that we have at least one query
+unless (@queries) {
+    $np->nagios_exit(UNKNOWN, "No queries specified. Use -q to specify queries, or provide paths in -l/--limit or -s/--string-checks parameters.");
+}
+
+# Update the opts to include auto-extracted queries
+$np->opts->{query} = \@queries;
 
 # Build URL
 my $protocol = $np->opts->ssl ? 'https' : 'http';
