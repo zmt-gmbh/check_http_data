@@ -576,7 +576,12 @@ if ($np->opts->debug) {
         foreach my $path (sort keys %json_paths) {
             my $value = $json_paths{$path};
             if (ref $value) {
-                $value = '[' . ref($value) . ']';
+                # Handle JSON::PP::Boolean specifically
+                if (ref($value) eq 'JSON::PP::Boolean') {
+                    $value = $value ? 'true' : 'false';
+                } else {
+                    $value = '[' . ref($value) . ']';
+                }
             } elsif (length($value) > 50) {
                 $value = substr($value, 0, 47) . '...';
             }
@@ -602,6 +607,7 @@ my @status_messages = ();
 foreach my $query (@{$np->opts->query}) {
     my @values;
     my $value_str = '';
+    my $numeric_value = undef; # Track the actual value for numeric operations
     
     if ($parser_type eq 'xml') {
         # Process XPath
@@ -624,6 +630,7 @@ foreach my $query (@{$np->opts->query}) {
         
         $value_str = $nodes[0]->textContent;
         $value_str =~ s/^\s+|\s+$//g;
+        $numeric_value = $value_str;
         
     } elsif ($parser_type eq 'json') {
         # Process JSONPath
@@ -646,16 +653,23 @@ foreach my $query (@{$np->opts->query}) {
         }
         
         my $first_value = $values[0];
+        my $numeric_value = $first_value; # Track the actual value for numeric operations
         if (ref $first_value) {
             if (ref $first_value eq 'ARRAY') {
                 $value_str = '[Array with ' . scalar(@$first_value) . ' elements]';
             } elsif (ref $first_value eq 'HASH') {
                 $value_str = '[Object with ' . scalar(keys %$first_value) . ' keys]';
+            } elsif (ref($first_value) eq 'JSON::PP::Boolean') {
+                # Convert JSON::PP::Boolean to string representation for display
+                $value_str = $first_value ? 'true' : 'false';
+                # Keep numeric representation for threshold evaluation
+                $numeric_value = $first_value ? 1 : 0;
             } else {
                 $value_str = '[' . ref($first_value) . ']';
             }
         } else {
             $value_str = defined $first_value ? $first_value : 'null';
+            $numeric_value = $first_value; # Keep original value for numeric operations
         }
     }
     
@@ -674,8 +688,10 @@ foreach my $query (@{$np->opts->query}) {
     $label =~ s|_+|_|g;              # Collapse multiple underscores
     $label = 'value' unless $label;  # Fallback if label is empty
     
-    # Check if value is numeric
-    my $is_numeric = $value_str =~ /^-?\d+\.?\d*$/;
+    # Check if value is numeric (including boolean values converted to 0/1)
+    my $is_boolean = (ref($numeric_value) eq 'JSON::PP::Boolean') || ($value_str =~ /^(true|false)$/);
+    my $is_numeric = $value_str =~ /^-?\d+\.?\d*$/ || $is_boolean;
+    my $eval_value = $is_boolean ? ($value_str eq 'true' ? 1 : 0) : (defined $numeric_value ? $numeric_value : $value_str);
     
     # Store result
     push @results, {
@@ -738,7 +754,7 @@ foreach my $query (@{$np->opts->query}) {
             critical => $thresholds{$query}->{critical} || undef
         );
         
-        my $result = $np->check_threshold($value_str);
+        my $result = $np->check_threshold($eval_value);
         if ($result > $overall_status) {
             $overall_status = $result;
         }
@@ -756,7 +772,7 @@ foreach my $query (@{$np->opts->query}) {
         
         $np->add_perfdata(
             label => $label,
-            value => $value_str,
+            value => $eval_value,
             warning => $warning,
             critical => $critical
         );
@@ -775,16 +791,27 @@ sub extract_json_paths {
     if (ref $data eq 'HASH') {
         foreach my $key (keys %$data) {
             my $new_path = $path eq '$' ? "\$.$key" : "$path.$key";
-            $paths->{$new_path} = $data->{$key} unless ref $data->{$key};
-            extract_json_paths($data->{$key}, $new_path, $paths) if ref $data->{$key};
+            # Handle JSON::PP::Boolean as scalar value
+            unless (ref $data->{$key} && ref($data->{$key}) ne 'JSON::PP::Boolean') {
+                $paths->{$new_path} = ref($data->{$key}) eq 'JSON::PP::Boolean' ? ($data->{$key} ? 'true' : 'false') : $data->{$key};
+            }
+            extract_json_paths($data->{$key}, $new_path, $paths) if ref $data->{$key} && ref($data->{$key}) ne 'JSON::PP::Boolean';
         }
     } elsif (ref $data eq 'ARRAY') {
         for (my $i = 0; $i < @$data; $i++) {
             my $new_path = "$path\[$i\]";
-            $paths->{$new_path} = $data->[$i] unless ref $data->[$i];
-            extract_json_paths($data->[$i], $new_path, $paths) if ref $data->[$i];
+            # Handle JSON::PP::Boolean as scalar value
+            unless (ref $data->[$i] && ref($data->[$i]) ne 'JSON::PP::Boolean') {
+                $paths->{$new_path} = ref($data->[$i]) eq 'JSON::PP::Boolean' ? ($data->[$i] ? 'true' : 'false') : $data->[$i];
+            }
+            extract_json_paths($data->[$i], $new_path, $paths) if ref $data->[$i] && ref($data->[$i]) ne 'JSON::PP::Boolean';
         }
     } else {
-        $paths->{$path} = $data;
+        # Handle JSON::PP::Boolean objects
+        if (ref($data) eq 'JSON::PP::Boolean') {
+            $paths->{$path} = $data ? 'true' : 'false';
+        } else {
+            $paths->{$path} = $data;
+        }
     }
 }
